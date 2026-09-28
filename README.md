@@ -11,6 +11,17 @@
 
 > 数据保存在浏览器 localStorage（配置、日记、聊天、步数），清浏览器数据会重置。
 
+## 部署到 GitHub Pages
+
+本仓库已放置 `.nojekyll`（跳过 Jekyll 构建，直接发布预生成静态站）。发布方式：
+
+**Settings → Pages → Build and deployment → Source: Deploy from a branch**，
+选 `main` / `/ (root)` 保存即可，约 1 分钟后生效。
+
+站点全部资源均为相对路径，因此子路径（`/仓库名/`）与自定义域名都可直接工作，
+无需改任何代码；`file://` 本地直开同样可用。线上版与本地版行为一致，
+数据仍写入各自浏览器的 localStorage，互不共享。
+
 ## 已移植功能（与原版对齐）
 
 - **桌宠本体**：状态机（idle/happy/sleep/deep/work/pet/hop/spin/chase/hide/flee/nervous/stare/relax/groom/eat/play/chin/pickup/paper/peek/…），TEMP_STATES 定时回落、`_back_to_base`、夜间/睡眠/工作陪伴模式。
