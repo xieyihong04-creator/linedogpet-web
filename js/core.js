@@ -29,8 +29,10 @@
   /* config.pyc 实际取出的 74 项默认配置（值与顺序 verbatim） */
   var DEFAULT_CONFIG = CFG.DEFAULT_CONFIG || {};
 
-  /* _RUNTIME_KEYS：这些键不写盘（原版每次启动重算） */
-  var RUNTIME_KEYS = D['config.runtime_keys'] || ['energy', 'theme_color', 'theme_radius', 'panel_opacity', 'pet_opacity', 'dark_mode'];
+  /* _RUNTIME_KEYS：字节码真值是空元组，且原版没有任何函数引用它。
+   * 原版 save_config() 全量写盘、不过滤键 —— 所以这里必须为空，
+   * 否则主题色/深色模式/透明度等用户设置会被静默丢弃（刷新即回默认）。 */
+  var RUNTIME_KEYS = D['config.runtime_keys'] || [];
 
   /* 其余模块的 verbatim 数据表（pet/assets/fx/drops/diary/observe/ai/panels/…） */
   var DATA = D;
@@ -42,14 +44,21 @@
     return m ? m[1] : '';
   }
 
-  /* ---- clamp 表（config._clamp 逐键范围；缺键时原样返回） ---- */
-  var CLAMP = {
-    size: [80, 320], cursor_size: [40, 160], bongo_size: [220, 900],
-    pet_count: [1, 4], theme_radius: [0, 22],
-    bubble_duration: [1200, 9000], paw_fade_sec: [1, 20],
-    mood: [0, 100], energy: [0, 100], fx_fps: [15, 60],
-    pet_opacity: [0.25, 1], panel_opacity: [0.4, 1], bongo_opacity: [0.25, 1]
+  /* ---- clamp 表：逐键范围取自 config.load_config 的 _clamp 调用真值。
+   * 原版只对下面 8 个键做夹取（pet_count / bongo_size / fx_fps / paw_fade_sec
+   * 在原版 load_config 里并不夹取，UI 的 setRange 才是它们的边界）。 ---- */
+  var CLAMP = D['config.clamp'] || {
+    size: [80, 260],
+    bubble_duration: [1500, 12000],
+    mood: [0, 100],
+    energy: [0, 100],
+    theme_radius: [0, 20],
+    panel_opacity: [0.5, 1.0],
+    pet_opacity: [0.3, 1.0],
+    cursor_size: [30, 150]
   };
+  /* UI 允许范围（SettingsDialog setRange 真值），供 panels.js 单一来源引用 */
+  var UI_RANGES = D['config.ui_ranges'] || {};
   function clampOne(k, v) {
     var r = CLAMP[k];
     if (!r) return v;

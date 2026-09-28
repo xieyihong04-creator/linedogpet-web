@@ -37,7 +37,7 @@
 
   /* 定时器 */
   var t_1s = null, t_2s = null, t_avoid = null, _save_timer = null;
-  var _trim_timer = null, _unlink_timer = null;
+  var _trim_timer = null;
   var _tick_count = 0;
 
   /* 睡眠/感知 */
@@ -49,6 +49,7 @@
 
   /* 避让 */
   var _win_rect = null;
+  var _last_mouse = null;        /* 原版 _avoid_one 用 QCursor.pos()，网页取最后一次 pointermove */
 
   /* 漫游/掉落 */
   var _next_roam_at = 0;
@@ -64,7 +65,6 @@
 
   /* AI */
   var ai_history = [];
-  var _chat_new = [];
 
   /* 更新检查 */
   var _update_urls = [];
@@ -111,6 +111,7 @@
 
   function record_activity(e) {
     _last_activity = C.ms();
+    if (e && e.clientX !== undefined) _last_mouse = { x: e.clientX, y: e.clientY };
     var now = C.ms();
     _click_window.push(now);
     while (_click_window.length && _click_window[0] < now - 10000) _click_window.shift();
@@ -157,7 +158,6 @@
     if (t_2s) t_2s.stop();
     if (t_avoid) t_avoid.stop();
     if (_trim_timer) _trim_timer.stop();
-    if (_unlink_timer) _unlink_timer.stop();
   }
 
   /* ---- §2: _tick_1s ---- */
@@ -334,8 +334,9 @@
     var pos = p.pos();
     var sz = p.size();
     var cx = pos.x + sz.w / 2, cy = pos.y + sz.h / 2;
-    var cur_x = window.innerWidth / 2, cur_y = window.innerHeight / 2;
-    if (C.hypot(cur_x - cx, cur_y - cy) < 160) {
+    /* 原版用 QCursor.pos() 判断「鼠标正指着宠物」→ 不干预（用户要贴着看）。
+     * 网页里最后一次 pointermove 即等价位置；没有鼠标事件（触屏）时不做该抑制。 */
+    if (_last_mouse && C.hypot(_last_mouse.x - cx, _last_mouse.y - cy) < 160) {
       p._overlap_streak = 0;
       return;
     }
@@ -347,6 +348,8 @@
       }
     }
 
+    /* 原版：if not pet.is_free() or pet.sleeping: return */
+    if (p.is_free && !p.is_free()) return;
     if (p.sleeping) return;
     var pl = pos.x, pt = pos.y, pr = pl + sz.w, pb = pt + sz.h;
     var cur_box = [pl, pt, pr, pb];
@@ -665,7 +668,18 @@
   }
 
   /* ---- §12: AI ---- */
+  /* 原版 ChatDialog._send → app.handle_chat(text)：
+   * add_msg('user') → 本地指令或 AI；AI 请求期间 set_busy(True)，
+   * 回复经 add_msg('pet'/'sys') + set_busy(False) 收尾。 */
+  function _chat_msg(role, text) {
+    if (global.Panels && global.Panels.chat_add_msg) global.Panels.chat_add_msg(role, text);
+  }
+  function _chat_busy(on) {
+    if (global.Panels && global.Panels.chat_set_busy) global.Panels.chat_set_busy(on);
+  }
+
   function handle_chat(text) {
+    _chat_msg('user', text);
     if (chat_db) chat_db.append('user', text);
     _record_diary('chat', cfg.mood, cfg.energy);
 
@@ -673,6 +687,7 @@
       var cmd = ai.parse(text);
       if (cmd && cmd.command) {
         var reply = _run_command(cmd.command);
+        _chat_msg('pet', reply);
         if (chat_db) chat_db.append('pet', reply);
         pet.show_bubble(reply, 3500);
         return;
@@ -682,6 +697,7 @@
     if (!(cfg.ai_enabled && cfg.ai_key)) {
       if (!cfg.ai_base) {
         var tip = 'AI 还没开启：托盘→设置→AI，填入你自己的 API 就能聊天啦';
+        _chat_msg('sys', tip);
         if (chat_db) chat_db.append('sys', tip);
         pet.show_bubble('要先在设置里填 API 哦~', 3200);
         return;
@@ -690,9 +706,17 @@
 
     var context_text = cfg.ai_context ? _ai_context_text() : '';
     ai_history.push({ role: 'user', content: text });
+    _chat_busy(true);
 
     if (ai && ai.chat) {
-      ai.chat(text, context_text, cfg, _ai_replied, _ai_failed);
+      /* 原版把 self.ai_history（内存态，不入 config）交给 AIWorker；
+       * 这里用只读视图带上，避免 ai_history 被 save_config 明文落盘 */
+      var view = {};
+      for (var vk in cfg) { if (Object.prototype.hasOwnProperty.call(cfg, vk)) view[vk] = cfg[vk]; }
+      view.ai_history = ai_history;
+      ai.chat(text, context_text, view, _ai_replied, _ai_failed);
+    } else {
+      _chat_busy(false);
     }
   }
 
@@ -702,7 +726,9 @@
     if (!text) text = '……';
     ai_history.push({ role: 'assistant', content: text });
     if (ai_history.length > 8) ai_history = ai_history.slice(-8);
+    _chat_msg('pet', text);
     if (chat_db) chat_db.append('pet', text);
+    _chat_busy(false);
     var short = text.length <= 40 ? text : text.substring(0, 40) + '…';
     pet.show_bubble(short, 6000);
     if (res && typeof res === 'object' && res.command) {
@@ -711,7 +737,9 @@
   }
 
   function _ai_failed(msg) {
+    _chat_msg('sys', msg);
     if (chat_db) chat_db.append('sys', msg);
+    _chat_busy(false);
     pet.show_bubble('我连不上 API，等下再试~', 3200);
   }
 
@@ -747,7 +775,9 @@
       cfg.size = Math.max(80, Math.min(260, cfg.size + arg));
       if (pet.replay) pet.replay();
       save_config();
-      return arg < 0 ? r.size[0] : r.size[1];
+      /* 原版 r['size'][arg < 0]：真值表用 True/False 作键，不是 0/1 */
+      var sz = r.size || {};
+      return (arg < 0 ? sz['True'] : sz['False']) || '好~';
     }
     if (kind === 'hide') { set_pet_visible(false); return r.hide; }
     if (kind === 'show') { set_pet_visible(true); return r.show; }
@@ -764,11 +794,14 @@
     return '好~';
   }
 
+  /* 原版：托盘/中键 → open_chat 信号 → app 打开 ChatDialog，
+   * 对话框的 submitted 接到 handle_chat。这里用单向 hooks 契约，
+   * on_action 只处理 'chat'，避免全局 'chat'→open_chat 的重开循环。 */
   function open_chat() {
     if (panels && panels.open_chat) {
-      panels.open_chat(cfg, {
-        on_submit: handle_chat,
-        on_msg: function(role, text) { _chat_new.push([role, text, C.ms() / 1000]); },
+      panels.open_chat({
+        get_cfg: function () { return cfg; },
+        on_action: function (name, text) { if (name === 'chat') handle_chat(text); },
         on_close: _chat_closed
       });
     }
@@ -778,17 +811,48 @@
     defer(_release_memory, 600);
   }
 
-  function _save_chat() {
-    if (!_chat_new.length) return;
-    if (chat_db) {
-      for (var i = 0; i < _chat_new.length; i++) {
-        chat_db.append(_chat_new[i][0], _chat_new[i][1]);
-      }
+  /* ---- §13: 更新检查 ---- */
+  /* S2-10 配套：原版 SettingsDialog._reset_defaults 把 DEFAULT_CONFIG 灌回 cfg 后
+   * 逐个发 preview_size/character/cursor_size + apply_theme + dark_mode_changed，
+   * 也就是「整份配置即时全量重刷」。网页侧对应这一个入口。 */
+  function _do_reset_config() {
+    if (pet) {
+      if (pet.set_config) pet.set_config(cfg);
+      if (pet.set_size) pet.set_size(cfg.size);
+      if (pet.update_speed) pet.update_speed();
+      if (pet.set_pet_opacity) pet.set_pet_opacity(cfg.pet_opacity);
+      if (pet.corner_hide) pet.corner_hide(!!cfg.lock_corner);
+      if (pet.replay) pet.replay();
     }
-    _chat_new = [];
+    for (var i = 0; i < extra_pets.length; i++) {
+      var ep = extra_pets[i];
+      if (ep.set_config) ep.set_config(cfg);
+      if (ep.set_size) ep.set_size(cfg.size);
+      if (ep.update_speed) ep.update_speed();
+      if (ep.replay) ep.replay();
+    }
+    if (cursor_pet) {
+      if (cursor_pet.set_config) cursor_pet.set_config(cfg);
+      if (cursor_pet.set_size) cursor_pet.set_size(cfg.cursor_size);
+      if (cursor_pet.set_character) cursor_pet.set_character(cfg.character);
+      if (cursor_pet.force_rerender) cursor_pet.force_rerender();
+    }
+    if (fx) {
+      if (fx.apply_config) fx.apply_config(cfg);
+      else if (fx.set_config) fx.set_config(cfg);
+    }
+    if (paw_canvas) {
+      if (paw_canvas.set_enabled) paw_canvas.set_enabled(cfg.paw_enabled);
+      if (paw_canvas.set_fade_sec) paw_canvas.set_fade_sec(cfg.paw_fade_sec);
+    }
+    if (sound && sound.setEnabled) sound.setEnabled(cfg.sound_on !== false);
+    _apply_modes();
+    if (panels && panels.apply_theme) panels.apply_theme(cfg);
+    _register_hotkey();
+    _sync_feature_switches();
+    save_config();
   }
 
-  /* ---- §13: 更新检查 ---- */
   function _auto_check_update() {
     _update_urls = (C.UPDATE_CHECK_URLS || []).slice();
     _update_idx = 0;
@@ -917,10 +981,14 @@
     var step_x = Math.max(w + 30, 40);
     var step_y = Math.max(h + 20, 40);
 
+    /* S3-12: 原版 4 列是 1920 宽桌面的经验值；窄窗口下 (i+1)%4 会让
+     * x 越过右边界被 clamp 到同一列，多只副宠直接重叠。按可用宽度算列数。 */
+    var cols = Math.max(1, Math.floor((geo.w - 80) / step_x));
+
     for (var i = 0; i < extra_pets.length; i++) {
       var p = extra_pets[i];
-      var col = (i + 1) % 4;
-      var row = Math.floor((i + 1) / 4);
+      var col = (i + 1) % cols;
+      var row = Math.floor((i + 1) / cols);
       var x = geo.x + 80 + col * step_x;
       var y = geo.y + geo.h - h - 40 - row * step_y;
       x = Math.max(geo.x, Math.min(x, geo.x + geo.w - w));
@@ -1017,6 +1085,9 @@
 
   /* ---- §17: LinkMonitor ---- */
   function setup_link_monitor() {
+    /* S1-1: 原版靠心跳检测 PawLiveWall 进程；网页没有原生伴侣，
+     * 视同常联机。初值若为 0，第一次心跳 (now-0>3000) 会误报掉线。 */
+    _link_last_ping = C.ms();
     if (typeof BroadcastChannel === 'undefined') return;
     try {
       _link_channel = new BroadcastChannel('linedogpet.link');
@@ -1028,28 +1099,18 @@
       };
       _link_channel.postMessage({ type: 'ping' });
       _link_heartbeat = setInterval(function() {
+        /* 只广播活跃信号；网页不做掉线判定（否则关一个标签页会误伤其余页） */
         _link_channel.postMessage({ type: 'ping' });
-        if (C.ms() - _link_last_ping > 3000) _on_link_down();
       }, 1000);
     } catch (err) {
       console.warn('LinkMonitor init failed:', err);
     }
+    _on_link_up();
   }
 
   function _on_link_up() {
-    if (_unlink_timer) _unlink_timer.stop();
     if (cursor_pet) cursor_pet.set_enabled(!!cfg.cursor_follow);
     if (music) music.set_enabled(!!cfg.music_enabled);
-  }
-
-  function _on_link_down() {
-    if (!_unlink_timer) _unlink_timer = new C.Timer(1300, _finish_unlink, true);
-    _unlink_timer.start();
-  }
-
-  function _finish_unlink() {
-    if (cursor_pet) cursor_pet.set_enabled(false);
-    if (music) music.set_enabled(false);
   }
 
   /* ---- §5: 迷你状态面板 status_provider（原版 StatusDialog 每秒 refresh） ---- */
@@ -1322,12 +1383,18 @@
   }
 
   function _release_memory(deep) {
-    if (global.gc) global.gc();
-    if (deep && extra_pets.length > 1) {
-      for (var i = 0; i < extra_pets.length; i++) {
-        var p = extra_pets[i];
-        if (p.clear_cache) p.clear_cache();
-      }
+    /* S3-15: 对齐原版 _release_memory(deep) 的语义：
+     *   busy = not pet.is_free() or pet.sleeping
+     *   busy 且非 deep → 只做浅回收；deep → 全量回收 + trim_working_set
+     * 网页里没有可显式调用的回收器（global.gc 需 --expose-gc，普通浏览器不可用），
+     * 真正能回收的是「隐藏中的宠物释放已解码图集位图」（Pet.clear_cache）。 */
+    var busy = !!(pet && pet.is_free && !pet.is_free()) || !!(pet && pet.sleeping);
+    if (global.gc) { try { global.gc(); } catch (e) {} }
+    if (busy && !deep) return;
+    if (pet && pet.clear_cache) pet.clear_cache();
+    for (var i = 0; i < extra_pets.length; i++) {
+      var p = extra_pets[i];
+      if (p.clear_cache) p.clear_cache();
     }
   }
 
@@ -1356,7 +1423,6 @@
   /* ---- 退出 ---- */
   function quit_app() {
     stop_timers();
-    _save_chat();
     C.save(cfg, true);
     if (pet && pet.dispose) pet.dispose();
     for (var i = 0; i < extra_pets.length; i++) {
@@ -1384,10 +1450,16 @@
         if (key === 'size' || key === 'fps_mode' || key === 'character' || key === 'click_squash_on' || key.indexOf('bubble_') === 0) {
           if (pet && pet.set_config) pet.set_config(cfg);
           if (key === 'character' && pet && pet.replay) pet.replay();
+          /* S1-5: size / fps_mode 原版是即时生效的
+           * （SettingsDialog → _on_value_changed → pet.set_size / update_speed） */
+          if (key === 'size' && pet && pet.set_size) pet.set_size(value);
+          if (key === 'fps_mode' && pet && pet.update_speed) pet.update_speed();
           for (var i = 0; i < extra_pets.length; i++) {
             var ep = extra_pets[i];
             if (ep.set_config) ep.set_config(cfg);
             if (key === 'character' && ep.replay) ep.replay();
+            if (key === 'size' && ep.set_size) ep.set_size(value);
+            if (key === 'fps_mode' && ep.update_speed) ep.update_speed();
           }
         }
         if (key === 'pet_count') _rebuild_extra_pets(value);
@@ -1421,12 +1493,37 @@
         else if (name === 'hide') start_hide();
         else if (name === 'chat') open_chat();
         else if (name === 'easter_egg') _on_milestone_unlocked();
-        else if (name === 'toggle_bongo') { cfg.bongo_enabled = !cfg.bongo_enabled; _apply_modes(); save_config(); }
-        else if (name === 'toggle_classic') { cfg.classic_enabled = !cfg.classic_enabled; _apply_modes(); save_config(); }
+        else if (name === 'toggle_bongo') { cfg.bongo_enabled = !cfg.bongo_enabled; cfg.classic_enabled = !cfg.bongo_enabled; _apply_modes(); save_config(); }
+        else if (name === 'toggle_classic') { cfg.classic_enabled = !cfg.classic_enabled; cfg.bongo_enabled = !cfg.classic_enabled; _apply_modes(); save_config(); }
         else if (name === 'pet_sleep') _pet_go_sleep();
         else if (name === 'wake') { if (pet.wake) pet.wake(); }
-        else if (name === 'restart_check_update') _auto_check_update();
-        else if (name === 'reset_config') { cfg = C.load(); _sync_feature_switches(); save_config(); }
+        /* S2-10: 对齐 panels 实际发出的动作名（原实现只认 app 内部菜单名，
+         * 对话框按钮的 check_update/reset_defaults/save_config/reset_sound/reset_cursor_gif 全被丢弃） */
+        else if (name === 'restart_check_update' || name === 'check_update') _auto_check_update();
+        else if (name === 'reset_config' || name === 'reset_defaults') { _do_reset_config(); }
+        else if (name === 'save_config') { C.save(cfg); }
+        else if (name === 'reset_sound') {
+          /* 原版 _reset_sound：只删 SOUNDS_DIR/bark.wav 这一个自定义叫声 */
+          try { localStorage.removeItem('linedogpet.sound.bark'); } catch (e) {}
+        }
+        else if (name === 'set_cursor_gif') {
+          if (cursor_pet && cursor_pet.set_gif) cursor_pet.set_gif(arg);
+        }
+        else if (name === 'reset_cursor_gif') {
+          /* 原版 _reset_cursor_gif：删 CURSOR_DIR 自定义图 → 恢复跟随主宠物表情 */
+          if (cursor_pet && cursor_pet.set_gif) cursor_pet.set_gif(null);
+        }
+        else if (name === 'add_character') { /* 网页无本地素材目录，角色列表由 panels 的 localStorage 自定义名单驱动 */ }
+        else if (name === 'del_character') {
+          /* 原版删除后若当前形象失效则回落 xiaobai（AssetIndex 兜底链等价） */
+          if (arg && cfg.character === arg) {
+            cfg.character = 'xiaobai';
+            if (pet && pet.replay) pet.replay();
+            for (var d = 0; d < extra_pets.length; d++) { if (extra_pets[d].replay) extra_pets[d].replay(); }
+            if (cursor_pet && cursor_pet.set_character) { cursor_pet.set_character('xiaobai'); if (cursor_pet.force_rerender) cursor_pet.force_rerender(); }
+            save_config();
+          }
+        }
         else if (name === 'show_steps') _show_steps();
         else if (name === 'open_website') { if (C.APP_WEBSITE) window.open(C.APP_WEBSITE); }
         else if (name === 'quit') quit_app();
@@ -1452,6 +1549,20 @@
     started = true;
 
     cfg = C.load();
+
+    /* S1-4: 原版 PetApp.__init__ 的开机迁移（app.py:113-116），逐条对齐：
+     *   if 'classic_enabled' not in cfg and 'bongo_enabled' not in cfg:
+     *       cfg['bongo_enabled'] = (cfg.get('pet_mode','classic') == 'bongo')
+     *   cfg['classic_enabled'] = not cfg['bongo_enabled']
+     *   cfg['pet_count'] = 1        # 旧档里的多宠物数量每次开机都会重置
+     * 注意 _RUNTIME_KEYS = () 为空，save_config 不过滤任何键；load_config 只 clamp 8 个键。 */
+    if (!Object.prototype.hasOwnProperty.call(cfg, 'classic_enabled') &&
+        !Object.prototype.hasOwnProperty.call(cfg, 'bongo_enabled')) {
+      cfg.bongo_enabled = (cfg.pet_mode || 'classic') === 'bongo';
+    }
+    cfg.classic_enabled = !cfg.bongo_enabled;
+    cfg.pet_count = 1;
+
     assets = new global.AssetIndex();
 
     if (global.Panels && global.Panels.apply_theme) global.Panels.apply_theme(cfg);
@@ -1463,7 +1574,12 @@
 
     if (global.EffectEngine) {
       var fx_canvas = $('fx');
-      if (fx_canvas) fx = new global.EffectEngine(fx_canvas, cfg);
+      if (fx_canvas) {
+        fx = new global.EffectEngine(fx_canvas, cfg);
+        /* S1-1: 网页没有 PawLiveWall 原生进程，联机门控恒为在线。
+         * 原版此处是 _check_link 检测进程存活后 set_link_active(True)。 */
+        fx.set_link_active(true);
+      }
     }
 
     if (global.PawCanvas) {
@@ -1493,6 +1609,8 @@
     if (global.AI) ai = global.AI;
     if (global.Panels) panels = global.Panels;
     if (global.CursorPet) cursor_pet = new global.CursorPet(assets, cfg);
+    /* S3-13: 恶作剧的「鼠标偏移」需要指针宠物句柄 */
+    if (prank && prank.set_cursor_pet) prank.set_cursor_pet(cursor_pet);
     if (global.Bongo) bongo = new global.Bongo(cfg);
 
     if (global.Pet) {
@@ -1501,6 +1619,8 @@
       if (pet.set_fx) pet.set_fx(fx);
       if (pet.set_diary_hooks) pet.set_diary_hooks(_record_diary);
       if (pet.place_initial) pet.place_initial();
+      /* S3-16: 原版 pet.open_chat 信号 → app.open_chat（中键唤起聊天框） */
+      if (pet.open_chat) pet.open_chat.connect(open_chat);
       pet.start();
     }
 
@@ -1538,6 +1658,7 @@
     start_chase: start_chase,
     start_hide: start_hide,
     handle_chat: handle_chat,
+    open_chat: open_chat,
     quit_app: quit_app,
     set_pet_count: function (n) { _rebuild_extra_pets(n); save_config(); },
     apply_modes: function () { _apply_modes(); },

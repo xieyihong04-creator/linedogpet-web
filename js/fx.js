@@ -4,8 +4,8 @@
  * Canvas 2D 实现，requestAnimationFrame 驱动。
  * 差异：原版 QWidget 全屏透明覆盖层 → 网页用 <canvas> pointer-events:none。
  * 差异：原版 winapi.pin_above_wallpaper → 网页无法钉在壁纸层，用 z-index 最低层模拟。
- * 差异：原版 _link_ok 门控 PawLiveWall 在线才渲染；网页默认 _link_active=false，
- *       需 app.js 调 set_link_active(true) 或 force_link(true) 才能看到特效。
+ * 差异：原版 _link_ok 门控 PawLiveWall 在线才渲染；网页没有原生伴侣进程，
+ *       视同常联机（app.js 启动时调 set_link_active(true)）。
  * ========================================================================== */
 (function (global) {
   'use strict';
@@ -96,6 +96,12 @@
         };
       }
       document.addEventListener('mousemove', this._onMove);
+      if (!this._onResizeBound) {
+        /* S2-11: 光源层同样跟随视口尺寸 */
+        var selfL = this;
+        this._onResizeBound = function () { if (selfL._enabled) selfL._resize(); };
+        window.addEventListener('resize', this._onResizeBound);
+      }
       this._loop();
     } else {
       if (this._onMove) document.removeEventListener('mousemove', this._onMove);
@@ -129,6 +135,10 @@
 
   CursorLightLayer.prototype.dispose = function () {
     this.set_enabled(false);
+    if (this._onResizeBound) {
+      window.removeEventListener('resize', this._onResizeBound);
+      this._onResizeBound = null;
+    }
     this._glow = null;
   };
 
@@ -192,6 +202,17 @@
     this._onMouseDown = function () { self._lb_prev_state = true; };
     this._onMouseUp = function () { self._lb_prev_state = false; };
     this._lb_prev_state = false;
+    /* S2-11: 画布尺寸跟随视口；不监听 resize 的话，改窗口大小后特效只画在旧区域。
+     * 同时把 _env_ready 置 false，让环境粒子按新边界重新铺场。 */
+    this._onResize = function () {
+      if (!self.canvas) return;
+      self.canvas.width = global.innerWidth;
+      self.canvas.height = global.innerHeight;
+      self._env_ready = false;
+    };
+    if (typeof window !== 'undefined') {
+      window.addEventListener('resize', this._onResize);
+    }
     if (typeof document !== 'undefined') {
       document.addEventListener('mousemove', this._onMouseMove);
       document.addEventListener('mousedown', this._onMouseDown);
@@ -899,6 +920,10 @@
   EffectEngine.prototype.dispose = function () {
     this.stop();
     if (this._cursorLight) { this._cursorLight.dispose(); this._cursorLight = null; }
+    if (typeof window !== 'undefined' && this._onResize) {
+      window.removeEventListener('resize', this._onResize);
+      this._onResize = null;
+    }
     if (typeof document !== 'undefined') {
       document.removeEventListener('mousemove', this._onMouseMove);
       document.removeEventListener('mousedown', this._onMouseDown);

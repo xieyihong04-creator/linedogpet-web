@@ -102,14 +102,83 @@ window.SMARTPET_DATA = {
   },
   "CONFIG_NAME": "config.json"
  },
- "config.runtime_keys": [
-  "energy",
-  "theme_color",
-  "theme_radius",
-  "panel_opacity",
-  "pet_opacity",
-  "dark_mode"
- ],
+ "config.runtime_keys": [],
+ "config.clamp": {
+  "size": [
+   80,
+   260
+  ],
+  "bubble_duration": [
+   1500,
+   12000
+  ],
+  "mood": [
+   0,
+   100
+  ],
+  "energy": [
+   0,
+   100
+  ],
+  "theme_radius": [
+   0,
+   20
+  ],
+  "panel_opacity": [
+   0.5,
+   1.0
+  ],
+  "pet_opacity": [
+   0.3,
+   1.0
+  ],
+  "cursor_size": [
+   30,
+   150
+  ]
+ },
+ "config.ui_ranges": {
+  "size": [
+   80,
+   500
+  ],
+  "bubble_duration": [
+   1500,
+   12000
+  ],
+  "pet_count": [
+   1,
+   15
+  ],
+  "bongo_size": [
+   120,
+   700
+  ],
+  "bongo_opacity": [
+   30,
+   100
+  ],
+  "cursor_size": [
+   30,
+   150
+  ],
+  "paw_fade_sec": [
+   2,
+   30
+  ],
+  "theme_radius": [
+   0,
+   20
+  ],
+  "panel_opacity": [
+   50,
+   100
+  ],
+  "pet_opacity": [
+   30,
+   100
+  ]
+ },
  "pet": {
   "IDLE": "idle",
   "WALK": "walk",

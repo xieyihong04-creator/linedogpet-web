@@ -132,6 +132,32 @@
     }
   }
 
+  /* ---- 本地日期工具：原版 diary 用 date.today()/weekday()（本地日期），
+   * 网页端必须用 getFullYear/getMonth/getDate，绝不能用 toISOString()（UTC），
+   * 否则 UTC+8 下每天 00:00–07:59 会整体错一天。 ---- */
+  function _pad2(n) { return (n < 10 ? '0' : '') + n; }
+
+  function localDateStr(d) {
+    return d.getFullYear() + '-' + _pad2(d.getMonth() + 1) + '-' + _pad2(d.getDate());
+  }
+
+  /* 原版 _WEEKDAYS = ['一'..'日'] 配合 Python date.weekday()（周一=0）索引，
+   * JS getDay() 是周日=0，故需 (getDay()+6)%7 转换，表本身不动。 */
+  function weekdayCN(d) {
+    /* 真值表在 SMARTPET_DATA.diary._WEEKDAYS（与 diary.js 同一来源），
+     * 顶层没有该键，别直接读 SMARTPET_DATA._WEEKDAYS */
+    var tbl = (global.Core && global.Core.DATA && global.Core.DATA.diary && global.Core.DATA.diary._WEEKDAYS) ||
+              (global.SMARTPET_DATA && global.SMARTPET_DATA._WEEKDAYS);
+    var names = tbl || ['一','二','三','四','五','六','日'];
+    return names[(d.getDay() + 6) % 7] || '';
+  }
+
+  function shiftDateStr(dateStr, deltaDays) {
+    var d = new Date(dateStr + 'T00:00:00');
+    d.setDate(d.getDate() + deltaDays);
+    return localDateStr(d);
+  }
+
   function hintColor(cfg) {
     var dark = !!(cfg && cfg.dark_mode);
     return colorFamily('#ff96bb', dark).hint;
@@ -377,6 +403,45 @@
     return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
 
+  /* ---- S3-19: 文件选择 —— 等价原版 QFileDialog.getOpenFileName ----
+   * 浏览器里用隐藏 <input type=file> + FileReader 转 DataURL，
+   * 存进 localStorage（原版是写入 SOUNDS_DIR / CURSOR_DIR 文件）。 */
+  function pickFile(accept, cb) {
+    var inp = document.createElement('input');
+    inp.type = 'file';
+    inp.accept = accept;
+    inp.style.display = 'none';
+    inp.addEventListener('change', function () {
+      var f = inp.files && inp.files[0];
+      if (f) {
+        var fr = new FileReader();
+        fr.onload = function () { cb(String(fr.result), f); };
+        fr.onerror = function () { alert('读取文件失败'); };
+        fr.readAsDataURL(f);
+      }
+      if (inp.parentNode) inp.parentNode.removeChild(inp);
+    });
+    document.body.appendChild(inp);
+    inp.click();
+  }
+
+  function _ls_set(key, val) {
+    try { localStorage.setItem(key, val); return true; }
+    catch (e) { alert('保存失败：本地存储空间不足（文件太大）'); return false; }
+  }
+
+  /* 原版 _refresh_sound_status：SOUNDS_DIR/bark.wav 是否存在 */
+  function _hasCustomSound() {
+    try { return !!localStorage.getItem('linedogpet.sound.bark'); }
+    catch (e) { return false; }
+  }
+
+  /* 原版 _refresh_cursor_gif_status：CURSOR_DIR/custom.gif 是否存在 */
+  function _hasCursorGif() {
+    try { return !!localStorage.getItem('linedogpet.cursor.custom'); }
+    catch (e) { return false; }
+  }
+
   /* ======================================================================
    * 5. open_settings(cfg, hooks) — 7 个 tab
    * ====================================================================== */
@@ -574,7 +639,8 @@
       custom.push(name);
       try { localStorage.setItem('linedogpet.custom_chars', JSON.stringify(custom)); } catch (e) {}
       if (hooks.on_action) hooks.on_action('add_character', name);
-      /* TODO: GIF upload — UI placeholder */
+      alert('已添加「' + name + '」。\n浏览器版无法像桌面版那样导入 GIF 素材，' +
+            '它会沿用默认形象的动画（原版此时会让你选择素材文件夹）。');
     });
     charRow.appendChild(addBtn);
     var delBtn = el('button', 'btn', '－ 删除');
@@ -603,25 +669,33 @@
     }
     var actSel = makeSelect(actItems, 'idle', function () {});
     upRow.appendChild(actSel);
-    var uploadBtn = el('button', 'btn', '上传 GIF…');
-    uploadBtn.addEventListener('click', function () {
-      /* TODO: file input for GIF upload to character/action folder */
-      alert('选择要上传的 GIF（会加入「' + (charSel.value) + '」的「' + (ACTION_CN[actSel.value] || actSel.value) + '」）');
-    });
+    var uploadBtn = el('button', 'btn', '上传 GIF…（即将支持）');
+    uploadBtn.disabled = true;
+    uploadBtn.title = '浏览器无法像桌面版那样把 GIF 写进素材目录并按帧播放，功能开发中';
     upRow.appendChild(uploadBtn);
+    upRow.appendChild(makeHint('浏览器里暂不支持把 GIF 装进角色素材库'));
     g2.appendChild(upRow);
 
-    /* custom sound */
+    /* custom sound —— 原版：选 wav → 写 SOUNDS_DIR/bark.wav → _refresh_sound_status */
     var sndRow = el('div', 'row');
     sndRow.innerHTML = '<label>自定义叫声：</label>';
+    var sndStatus = el('span', '', _hasCustomSound() ? '已使用自定义音频' : '使用内置叫声');
+    sndStatus.style.cssText = 'color:var(--tx3);font-size:11px;margin-right:6px';
+    sndRow.appendChild(sndStatus);
     var sndPick = el('button', 'btn', '选择音频…');
     sndPick.addEventListener('click', function () {
-      alert('选择叫声音频（wav，建议 1 秒以内）');
+      pickFile('audio/wav,audio/x-wav,audio/*', function (dataUrl) {
+        if (_ls_set('linedogpet.sound.bark', dataUrl)) {
+          sndStatus.textContent = '已使用自定义音频';
+          alert('叫声已切换为你选的音频，立即生效。');
+        }
+      });
     });
     sndRow.appendChild(sndPick);
     var sndReset = el('button', 'btn', '恢复默认');
     sndReset.addEventListener('click', function () {
       if (hooks.on_action) hooks.on_action('reset_sound');
+      sndStatus.textContent = '使用内置叫声';
     });
     sndRow.appendChild(sndReset);
     g2.appendChild(sndRow);
@@ -712,14 +786,25 @@
 
     var cursorRow = el('div', 'row');
     cursorRow.innerHTML = '<label>自定义表情：</label>';
+    var cursorStatus = el('span', '', _hasCursorGif() ? '已使用自定义表情' : '跟随主宠物表情');
+    cursorStatus.style.cssText = 'color:var(--tx3);font-size:11px;margin-right:6px';
+    cursorRow.appendChild(cursorStatus);
     var cursorUp = el('button', 'btn', '上传自定义表情…');
     cursorUp.addEventListener('click', function () {
-      alert('选择鼠标宠物自定义表情');
+      /* 原版：选 gif → 写 CURSOR_DIR/custom.gif → cursor_custom_gif='' → preview_character_changed */
+      pickFile('image/gif', function (dataUrl, f) {
+        if (hooks.on_action) hooks.on_action('set_cursor_gif', dataUrl);
+        cfg.cursor_custom_gif = '';               /* 原版重置路径字段（网页存 DataURL） */
+        cursorStatus.textContent = '已使用自定义表情';
+        alert('自定义表情已上传，立即生效。');
+      });
     });
     cursorRow.appendChild(cursorUp);
     var cursorReset = el('button', 'btn', '恢复默认');
     cursorReset.addEventListener('click', function () {
       if (hooks.on_action) hooks.on_action('reset_cursor_gif');
+      cfg.cursor_custom_gif = '';
+      cursorStatus.textContent = '跟随主宠物表情';
     });
     cursorRow.appendChild(cursorReset);
     g2.appendChild(cursorRow);
@@ -858,6 +943,17 @@
     keyInp.addEventListener('change', function () { oc('ai_key', keyInp.value); });
     keyRow.appendChild(keyInp);
     g2.appendChild(keyRow);
+    /* S3-20: 透明说明密钥的存储风险（桌面版写明文到 config.json，
+     * 网页版明文存在这台浏览器的 localStorage 里，同源脚本/扩展都能读到） */
+    g2.appendChild(makeHint('密钥以明文保存在这台浏览器的本地存储（localStorage）里，' +
+      '与桌面版写入 config.json 等价，但同源的脚本、浏览器扩展都可能读到它。' +
+      '请使用共享额度小、可随时吊销的 Key，公共电脑上用完请点「清除」。'));
+    var keyClear = el('button', 'btn', '清除本机密钥');
+    keyClear.addEventListener('click', function () {
+      keyInp.value = '';
+      oc('ai_key', '');
+    });
+    g2.appendChild(keyClear);
 
     var modelRow = el('div', 'row');
     modelRow.innerHTML = '<label>模型：</label>';
@@ -1233,6 +1329,9 @@
   /* ======================================================================
    * 7. open_chat(hooks)
    * ====================================================================== */
+  /* 当前聊天对话框的 DOM 引用（供 chat_add_msg / chat_set_busy 使用） */
+  var _chat = null;
+
   function openChat(hooks) {
     hooks = hooks || {};
     var body = $('dlgbody');
@@ -1243,8 +1342,9 @@
     var dlgTitle = $('dlgtitle');
     if (dlgTitle) dlgTitle.textContent = '和桌宠说句话（滚轮中键点它也能打开）';
 
-    /* chat hint */
-    var aiOn = hooks.get_cfg && hooks.get_cfg().ai_enabled;
+    /* chat hint —— 原版 set_ai_enabled(on) */
+    var _cfg = (hooks.get_cfg && hooks.get_cfg()) || {};
+    var aiOn = !!_cfg.ai_enabled;
     var hintText = aiOn
       ? 'AI 已开启，直接对话~'
       : 'AI 未开启：现在只能执行本地指令（变小/躲起来/出来/安静/陪我玩等），\n想聊天请去 设置→AI填入你自己的API。';
@@ -1257,6 +1357,7 @@
     var chatlog = el('div');
     chatlog.id = 'chatlog';
     body.appendChild(chatlog);
+    _chat = { log: chatlog, sendBtn: null, inp: null };
 
     /* load history */
     if (global.ChatDB && global.ChatDB.history) {
@@ -1282,24 +1383,16 @@
     var sendBtn = el('button', 'btn pri', '发送');
     form.appendChild(sendBtn);
     body.appendChild(form);
+    _chat.sendBtn = sendBtn;
+    _chat.inp = inp;
 
+    /* 原版 ChatDialog._send()：只取文本、清空输入、emit submitted(text)。
+     * 用户气泡/入库/回复全部由 app.handle_chat 通过 add_msg 完成，避免双写。 */
     function send() {
-      var text = inp.value.trim();
+      var text = inp.value.replace(/^\s+|\s+$/g, '');
       if (!text) return;
       inp.value = '';
-
-      /* user message */
-      var userDiv = el('div', 'msg me');
-      userDiv.textContent = text;
-      chatlog.appendChild(userDiv);
-
-      if (global.ChatDB && global.ChatDB.append) {
-        global.ChatDB.append('user', text);
-      }
-
       if (hooks.on_action) hooks.on_action('chat', text);
-
-      chatlog.scrollTop = chatlog.scrollHeight;
     }
 
     sendBtn.addEventListener('click', send);
@@ -1307,8 +1400,32 @@
       if (e.key === 'Enter') { e.preventDefault(); send(); }
     });
 
-    openDialog();
+    openDialog(function () {
+      /* 原版：对话框关闭后 600ms 释放内存 */
+      _chat = null;
+      if (hooks.on_close) hooks.on_close();
+    });
     inp.focus();
+  }
+
+  /* ---- ChatDialog.add_msg(role, text)：按角色着色追加一条消息 ---- */
+  function chatAddMsg(role, text) {
+    if (!_chat || !_chat.log) return;
+    var cls = role === 'user' ? 'me' : (role === 'system' || role === 'sys' ? 'sys' : 'pet');
+    var div = el('div', 'msg ' + cls);
+    div.textContent = text;                       /* textContent：无 XSS 面 */
+    _chat.log.appendChild(div);
+    _chat.log.scrollTop = _chat.log.scrollHeight;
+  }
+
+  /* ---- ChatDialog.set_busy(on)：请求期间禁用输入并改按钮文案 ---- */
+  function chatSetBusy(on) {
+    if (!_chat) return;
+    if (_chat.inp) _chat.inp.disabled = !!on;
+    if (_chat.sendBtn) {
+      _chat.sendBtn.disabled = !!on;
+      _chat.sendBtn.textContent = on ? '思考中…' : '发送';
+    }
   }
 
   /* ======================================================================
@@ -1324,8 +1441,7 @@
     if (dlgTitle) dlgTitle.innerHTML = '📖 小狗日记';
 
     var diary = global.Diary;
-    var today = new Date();
-    var curDate = today.toISOString().slice(0, 10);
+    var curDate = localDateStr(new Date());
 
     /* header */
     var head = el('div', 'dlhead');
@@ -1349,11 +1465,6 @@
     /* tip */
     body.appendChild(makeHint('每天打开时，我都会根据当天发生的事实时写一篇日记~'));
 
-    function weekdays(d) {
-      var names = '一二三四五六日';
-      return names[d.getDay()];
-    }
-
     function dayLabel(dateStr) {
       var d = new Date(dateStr + 'T00:00:00');
       var dayN = 1;
@@ -1365,13 +1476,14 @@
           if (dayN < 1) dayN = 1;
         }
       }
-      return d.getFullYear() + '年' + (d.getMonth() + 1) + '月' + d.getDate() + '日 星期' + weekdays(d) + ' · Day ' + dayN;
+      return d.getFullYear() + '年' + (d.getMonth() + 1) + '月' + d.getDate() + '日 星期' + weekdayCN(d) + ' · Day ' + dayN;
     }
 
     function refresh() {
       dateLabel.textContent = dayLabel(curDate);
-      var todayStr = today.toISOString().slice(0, 10);
-      prevBtn.disabled = curDate <= (diary && diary.stats && diary.stats().first_day ? diary.stats().first_day : todayStr);
+      var todayStr = localDateStr(new Date());
+      var firstDay = (diary && diary.stats && diary.stats().first_day) || todayStr;
+      prevBtn.disabled = curDate <= firstDay;
       nextBtn.disabled = curDate >= todayStr;
 
       var text = '';
@@ -1386,20 +1498,15 @@
     }
 
     prevBtn.addEventListener('click', function () {
-      var d = new Date(curDate + 'T00:00:00');
-      d.setDate(d.getDate() - 1);
-      curDate = d.toISOString().slice(0, 10);
+      curDate = shiftDateStr(curDate, -1);
       refresh();
     });
     nextBtn.addEventListener('click', function () {
-      var d = new Date(curDate + 'T00:00:00');
-      var todayStr = today.toISOString().slice(0, 10);
-      d.setDate(d.getDate() + 1);
-      var next = d.toISOString().slice(0, 10);
-      if (next <= todayStr) { curDate = next; refresh(); }
+      var next = shiftDateStr(curDate, 1);
+      if (next <= localDateStr(new Date())) { curDate = next; refresh(); }
     });
     todayBtn.addEventListener('click', function () {
-      curDate = today.toISOString().slice(0, 10);
+      curDate = localDateStr(new Date());
       refresh();
     });
 
@@ -1528,15 +1635,46 @@
   /* ======================================================================
    * 10. Dialog open/close helpers
    * ====================================================================== */
-  function openDialog() {
+  var _dialogClosedCb = null;
+
+  function openDialog(onClosed) {
     var root = $('dlgroot');
+    _dialogClosedCb = onClosed || null;
     if (root) root.classList.add('open');
   }
 
   function closeDialog() {
     var root = $('dlgroot');
-    if (root) root.classList.remove('open');
+    if (!root || !root.classList.contains('open')) return;
+    root.classList.remove('open');
+    var cb = _dialogClosedCb;
+    _dialogClosedCb = null;
+    if (cb) { try { cb(); } catch (e) { console.error(e); } }
   }
+
+  /* 绑定 ✕ / 点击遮罩 / Esc —— 三者原版都有（QDialog 默认 Esc 关闭 + 关闭按钮） */
+  function _bindDialogChrome() {
+    var root = $('dlgroot');
+    var btn = $('dlgclose');
+    if (btn && !btn._bound) {
+      btn._bound = true;
+      btn.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); closeDialog(); });
+    }
+    if (root && !root._bound) {
+      root._bound = true;
+      /* 只有点在遮罩本身（非 #dlg 内部）才关闭 */
+      root.addEventListener('mousedown', function (e) {
+        if (e.target === root) closeDialog();
+      });
+    }
+    if (!global._dlgEscBound) {
+      global._dlgEscBound = true;
+      document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape' || e.key === 'Esc') closeDialog();
+      });
+    }
+  }
+  _bindDialogChrome();
 
   /* ======================================================================
    * 11. Character helpers
@@ -1570,6 +1708,8 @@
     open_settings: openSettings,
     open_status: openStatus,
     open_chat: openChat,
+    chat_add_msg: chatAddMsg,
+    chat_set_busy: chatSetBusy,
     open_diary: openDiary,
     open_milestone: openMilestone,
     close_dialog: closeDialog,

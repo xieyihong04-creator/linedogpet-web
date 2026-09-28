@@ -29,10 +29,13 @@
     this._timer = null;
     this._resize();
     var self = this;
-    window.addEventListener('resize', function () { self._resize(); });
+    /* S2-9: 保存引用，dispose 时移除，避免销毁后监听器仍持有/回调旧画布 */
+    this._onResize = function () { self._resize(); };
+    window.addEventListener('resize', this._onResize);
   }
 
   PawCanvas.prototype._resize = function () {
+    if (!this.canvas) return;
     this.canvas.width = window.innerWidth;
     this.canvas.height = window.innerHeight;
   };
@@ -126,6 +129,10 @@
 
   PawCanvas.prototype.dispose = function () {
     this.clear();
+    if (this._onResize) {
+      window.removeEventListener('resize', this._onResize);
+      this._onResize = null;
+    }
     this.canvas = null;
     this.ctx = null;
   };
@@ -140,7 +147,11 @@
   }
 
   StepCounter.prototype._check_day = function () {
-    var today = new Date().toISOString().slice(0, 10);
+    /* S2-7: 原版是 Python date.today()（本地日期）；toISOString 是 UTC，
+     * 本地 0-8 点会算到昨天，跨天重置时机错位。改用本地日期串。 */
+    var d = new Date();
+    var p = function (n) { return (n < 10 ? '0' : '') + n; };
+    var today = d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
     if (this.cfg.paw_steps_date !== today) {
       this.cfg.paw_steps_today = 0;
       this.cfg.paw_steps_date = today;
@@ -185,6 +196,7 @@
     cfg: null,
     paw: null,
     pet: null,
+    cursor: null,
     _timer: null,
     _started: false,
 
@@ -194,17 +206,20 @@
       this.pet = pet;
     },
 
-    swap: function (pet) {
-      /* 差异：原版随机替换宠物素材为 scared/nervous，网页用状态切换模拟 */
-      if (!pet || !pet.set_state) return;
-      var states = ['scared', 'nervous', 'surprised'];
-      var s = states[Math.floor(Math.random() * states.length)];
-      pet._prank_orig_state = pet.state;
-      pet.set_state(s, 2000);
-    },
+    /* S3-13: 原版 Prank 只有两种恶作剧（pawprint.py:155-161）：
+     *   r<0.4 且 prank_mouse → _nudge_cursor()（OS 光标 ±2px）
+     *   r<0.8 → _tiny_paws()
+     * 之前这里的 swap/unswap「切换宠物状态」是臆造的，原版不存在，已删除。
+     * 浏览器无法移动系统光标，用「让鼠标宠物偏移 ±2px」作为可见等价实现。 */
+    set_cursor_pet: function (cp) { this.cursor = cp; },
 
-    unswap: function () {
-      /* 恢复原状态由 set_state 的 duration 自动处理 */
+    _nudge_cursor: function () {
+      var cp = this.cursor;
+      if (!cp || cp._enabled !== true) return;
+      var dx = Core.rndInt(-2, 2);
+      var dy = Core.rndInt(-2, 2);
+      if (!dx && !dy) return;
+      cp.update((cp._last_x || 0) + dx, (cp._last_y || 0) + dy);
     },
 
     set_enabled: function (on) {
@@ -222,12 +237,13 @@
     _tick: function () {
       if (!this.cfg || !this.cfg.prank_enabled) return;
       var r = Math.random();
-      /* 40% 概率宠物恶作剧（替换素材），40% 小爪印，20% 无 */
-      if (r < 0.4) {
-        if (this.pet) this.swap(this.pet);
-      } else if (r < 0.8) {
-        this._tiny_paws();
+      /* 与原版逐分支一致：r<0.4 且 prank_mouse 开 → 动光标并结束；
+       * r<0.4 但 prank_mouse 关 → 继续 fall through 到 r<0.8 判定小爪印。 */
+      if (r < 0.4 && this.cfg.prank_mouse) {
+        this._nudge_cursor();
+        return;
       }
+      if (r < 0.8) this._tiny_paws();
     },
 
     _tiny_paws: function () {

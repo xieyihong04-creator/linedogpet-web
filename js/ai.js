@@ -178,10 +178,10 @@
     var model = cfg.ai_model || 'gpt-4o-mini';
 
     if (!base || !key) {
-      var tip = '\u8FD8\u6CA1\u586B API \u5730\u5740\u6216\u5BC6\u94A5\u54E6' +
-        '\uFF08\u6258\u76D8\u53F3\u952E \u2192 \u8BBE\u7F6E \u2192 AI\uFF09';
-      if (cb_ok) cb_ok({ reply: _local_fallback(user_text), command: null, fallback: true });
-      if (cb_err) cb_err(tip);
+      /* S3-14: 未配置属于「可解释的正常结果」，只走一个回调。
+       * 之前 cb_ok + cb_err 双发，聊天框会同时出现兜底回复和错误提示。 */
+      var tip = '还没填 API 地址或密钥哦（设置 → AI）';
+      if (cb_ok) cb_ok({ reply: tip, command: null, fallback: true });
       return;
     }
 

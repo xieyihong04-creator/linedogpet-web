@@ -339,6 +339,20 @@
       self._on_right_click(e);
     });
 
+    /* 中键（滚轮按下）→ 打开对话：等价原版 mousePressEvent MiddleButton
+     * 原版：_rec_activity('talk') + self.open_chat.emit()
+     * 浏览器里 pointerdown 会先于 auxclick 触发，但 button!==0 已被 _on_pointer_down 忽略，
+     * 故在此单独处理 auxclick，并阻止默认的中键自动滚动/粘贴行为。 */
+    el.addEventListener('auxclick', function (e) {
+      if (e.button !== 1) return;
+      e.preventDefault();
+      self._rec_activity('talk');
+      self.open_chat.emit();
+    });
+    el.addEventListener('mousedown', function (e) {
+      if (e.button === 1) e.preventDefault();   /* 抑制中键自动滚动图标 */
+    });
+
     /* cursor tracking on document */
     this._onDocCursor = function (e) {
       self._cursor_x = e.clientX;
@@ -1334,6 +1348,8 @@
   Pet.prototype.show = function () {
     this._visible = true;
     this.el.style.display = 'block';
+    /* clear_cache 释放过位图的话，重新出场时需要立刻恢复渲染 */
+    if (!this.movie) this.replay();
   };
 
   Pet.prototype.is_visible = function () { return this._visible; };
@@ -1662,6 +1678,19 @@
   Pet.prototype.replay = function () {
     this._last_path = '';
     this._play(STATE_GIF[this.state] || 'idle');
+  };
+
+  /* ---- clear_cache() — S3-15 ----
+   * 原版 _release_memory 用 gc.collect(1) + winapi.trim_working_set 回收内存；
+   * 网页没有可显式回收的堆，这里做真正的等价动作：释放已解码的图集位图
+   * （仅在隐藏时执行，避免可见时闪一帧）。下次 show() 会 replay 回来。 */
+  Pet.prototype.clear_cache = function () {
+    if (this._visible) return;
+    this._last_path = '';
+    if (this.movie) {
+      this.movie.dispose();
+      this.movie = null;
+    }
   };
 
   /* ---- Drag API (for external callers) ---- */

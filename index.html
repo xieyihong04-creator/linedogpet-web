@@ -49,7 +49,7 @@
 
   /* ---- pet ---- */
   #pets{position:absolute;inset:0;z-index:18}
-  .pet{position:absolute;left:0;top:0;background-repeat:no-repeat;background-image:var(--atlas);
+  .pet{position:absolute;left:0;top:0;background-repeat:no-repeat;
     will-change:left,top;cursor:default}
   .pet.bubblehost{z-index:20}
   .pet .bubble{position:absolute;left:50%;bottom:100%;transform:translateX(-50%);
@@ -61,7 +61,7 @@
 
   /* ---- cursor pet ---- */
   #cursorpet{position:fixed;left:0;top:0;z-index:22;pointer-events:none;background-repeat:no-repeat;
-    background-image:var(--atlas);will-change:left,top}
+    will-change:left,top}
 
   /* ---- bongo ---- */
   #bongo{position:fixed;left:0;top:0;z-index:23;cursor:grab}
@@ -70,14 +70,14 @@
   #bongo.mirror #bongoimg{transform:scaleX(-1)}
 
   /* ---- drops ---- */
-  .drop{position:absolute;z-index:16;width:34px;height:34px;display:flex;align-items:center;justify-content:center;
-    font-size:24px;line-height:1;cursor:pointer;transition:transform .12s;filter:drop-shadow(0 2px 3px rgba(0,0,0,.25))}
-  .drop:hover{transform:scale(1.18)}
+  .dropped-item{position:absolute;z-index:16;display:flex;align-items:center;justify-content:center;
+    cursor:pointer;transition:transform .12s;filter:drop-shadow(0 2px 3px rgba(0,0,0,.25))}
+  .dropped-item:hover{transform:scale(1.18)}
 
   /* ---- shot bubble ---- */
-  #shot{position:absolute;z-index:30;padding:6px;background:#fff;border-radius:12px;box-shadow:0 4px 16px rgba(0,0,0,.24);
+  .shot-bubble{position:fixed;z-index:30;padding:6px;background:#fff;border-radius:12px;box-shadow:0 4px 16px rgba(0,0,0,.24);
     transform:translate(-50%,-118%)}
-  #shot img{display:block;max-width:150px;max-height:110px;border-radius:8px}
+  .shot-bubble img{display:block;max-width:150px;max-height:110px;border-radius:8px}
 
   /* ---- dialogs ---- */
   #dlgroot{position:fixed;inset:0;z-index:100;display:none;align-items:center;justify-content:center;
@@ -226,8 +226,6 @@
 <div id="bongo" hidden>
   <img id="bongoimg" alt="bongo dog">
 </div>
-
-<div id="shot" hidden><img alt=""></div>
 
 <div id="dlgroot">
   <div id="dlg">
