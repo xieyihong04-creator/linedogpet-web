@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>线条小狗桌宠 · LineDogPet Web</title>
+<style>
+  /* reset */
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+  html,body{height:100%;overflow:hidden;user-select:none;touch-action:none}
+  body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif}
+  [hidden]{display:none!important}
+  button{font:inherit;border:none;background:none;cursor:pointer}
+  input,select,textarea{font:inherit}
+
+  /* ---- desktop ---- */
+  #scene{position:fixed;inset:0;background:linear-gradient(160deg,#e9eef5,#d9e1ec);transition:background .3s}
+  #scene{overflow:hidden}
+  #scene::before{content:"";position:absolute;left:0;right:0;top:0;bottom:40%;pointer-events:none;opacity:.35;
+    background:radial-gradient(90% 60% at 20% 0%,rgba(255,255,255,.9),transparent 70%)}
+  #wallpaper{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;opacity:.12}
+  #wallpaper svg{width:min(76vmin,720px)}
+
+  /* ---- pseudo window ---- */
+  #win{position:absolute;width:330px;min-width:280px;max-width:520px;background:#fff;border:1px solid #d0d7e2;
+    border-radius:8px;box-shadow:0 10px 30px rgba(20,30,50,.24);overflow:hidden;z-index:10;
+    min-height:130px;display:flex;flex-direction:column}
+  body.dark #win{background:#26292f;border-color:#3a3f49;color:#e6e9ef}
+  #winbar{height:26px;display:flex;align-items:center;gap:6px;padding:0 6px 0 10px;
+    background:#f2f4f8;border-bottom:1px solid #dfe4ec;cursor:grab;flex:none;font-size:12px;color:#7b8698}
+  body.dark #winbar{background:#2d3138;border-color:#3a3f49;color:#9aa4b3}
+  #winbar:active{cursor:grabbing}
+  #wintitle{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #winmax{font-size:13px;color:#8b95a7}
+  #winclose{width:18px;height:18px;border-radius:50%;background:#e6483d;color:#fff;font-size:11px;line-height:18px;text-align:center}
+  #winbody{padding:10px 12px;font-size:13px;line-height:1.55;color:#3c4657}
+  body.dark #winbody{color:#c7cfdb}
+  #winbody textarea,#winbody input,#winbody select{width:100%;padding:6px 8px;border:1px solid #cfd6e2;border-radius:5px;font-size:13px}
+  #winbody textarea{min-height:90px;resize:vertical;line-height:1.6;font-family:ui-monospace,Menlo,Consolas,monospace}
+  .wl{display:flex;gap:6px;align-items:baseline}
+  .wl::before{content:"•";color:#c1c9d6}
+  #winbody .btns{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
+
+  /* ---- fx canvases ---- */
+  canvas.layer{position:absolute;left:0;top:0;pointer-events:none;image-rendering:auto}
+  #fx{z-index:6}
+  #paw{z-index:7}
+
+  /* ---- pet ---- */
+  #pets{position:absolute;inset:0;z-index:18}
+  .pet{position:absolute;left:0;top:0;background-repeat:no-repeat;background-image:var(--atlas);
+    will-change:left,top;cursor:default}
+  .pet.bubblehost{z-index:20}
+  .pet .bubble{position:absolute;left:50%;bottom:100%;transform:translateX(-50%);
+    max-width:200px;padding:6px 10px;border-radius:10px;font-size:13px;line-height:1.35;
+    color:#222;background:#fff;box-shadow:0 2px 8px rgba(0,0,0,.16);text-align:center;white-space:normal;
+    word-break:break-all;pointer-events:none}
+  .pet .bubble::after{content:"";position:absolute;top:100%;left:50%;margin-left:-5px;
+    border:5px solid transparent;border-top-color:inherit}
+
+  /* ---- cursor pet ---- */
+  #cursorpet{position:fixed;left:0;top:0;z-index:22;pointer-events:none;background-repeat:no-repeat;
+    background-image:var(--atlas);will-change:left,top}
+
+  /* ---- bongo ---- */
+  #bongo{position:fixed;left:0;top:0;z-index:23;cursor:grab}
+  #bongo:active{cursor:grabbing}
+  #bongoimg{display:block;width:100%;height:100%;object-fit:contain;pointer-events:none}
+  #bongo.mirror #bongoimg{transform:scaleX(-1)}
+
+  /* ---- drops ---- */
+  .drop{position:absolute;z-index:16;width:34px;height:34px;display:flex;align-items:center;justify-content:center;
+    font-size:24px;line-height:1;cursor:pointer;transition:transform .12s;filter:drop-shadow(0 2px 3px rgba(0,0,0,.25))}
+  .drop:hover{transform:scale(1.18)}
+
+  /* ---- shot bubble ---- */
+  #shot{position:absolute;z-index:30;padding:6px;background:#fff;border-radius:12px;box-shadow:0 4px 16px rgba(0,0,0,.24);
+    transform:translate(-50%,-118%)}
+  #shot img{display:block;max-width:150px;max-height:110px;border-radius:8px}
+
+  /* ---- dialogs ---- */
+  #dlgroot{position:fixed;inset:0;z-index:100;display:none;align-items:center;justify-content:center;
+    background:rgba(20,25,35,.28);backdrop-filter:blur(2px)}
+  #dlgroot.open{display:flex}
+  #dlg{width:min(680px,calc(100vw - 24px));height:min(560px,calc(100vh - 24px));display:flex;flex-direction:column;
+    overflow:hidden;box-shadow:0 18px 60px rgba(10,20,40,.4)}
+  #dlgchat{width:min(430px,calc(100vw - 24px));height:min(460px,calc(100vh - 24px));margin:0;box-shadow:0 14px 44px rgba(0,0,0,.4)}
+  #dialog,.panel,.card,#status{border:1px solid var(--bd)}
+  #dlghead{height:34px;display:flex;align-items:center;padding:0 12px;font-size:14px;font-weight:600;color:var(--tx);
+    background:var(--head);border-bottom:1px solid var(--bd);flex:none}
+  #dlghead .sp{flex:1}
+  #dlgclose{width:20px;height:20px;border-radius:50%;background:var(--bd);color:var(--tx);font-size:14px;line-height:20px;text-align:center}
+  #dlgbody{flex:1;overflow-y:auto;background:var(--bg);color:var(--tx);display:none;padding:14px 16px}
+  #dlgbody[data-page="settings"]{display:block}
+  #dlgbody[data-page="chat"]{display:flex;flex-direction:column;padding:0;overflow:hidden}
+
+  /* ---- settings ---- */
+  .tabs{display:flex;gap:2px;flex-wrap:wrap;margin-bottom:12px;border-bottom:1px solid var(--bd)}
+  .tabs button{padding:7px 11px;font-size:12.5px;color:var(--tx2);border-bottom:2px solid transparent;background:none}
+  .tabs button[aria-selected="true"]{color:var(--pri);border-bottom-color:var(--pri);font-weight:600}
+  .grp{margin:0 0 14px;padding:11px 12px 12px;border:1px solid var(--bd);border-radius:var(--r);background:var(--card)}
+  .grp>h4{font-size:12px;color:var(--tx2);font-weight:600;letter-spacing:.5px;margin-bottom:9px}
+  .row{display:flex;align-items:center;gap:9px;min-height:29px;margin:5px 0;font-size:12.5px;color:var(--tx)}
+  .row>label{flex:1;min-width:96px;color:var(--tx);cursor:default}
+  .row.col{display:block}
+  .row .lbl{display:block;font-size:12px;color:var(--tx);margin-bottom:5px}
+  .row select,.row input[type=text],.row input[type=password]{flex:0 1 220px;max-width:220px;padding:4px 6px;font-size:12.5px;
+    color:var(--tx);background:var(--inp);border:1px solid var(--bd);border-radius:calc(var(--r) - 3px)}
+  .row input[type=range]{flex:0 1 200px;max-width:200px;accent-color:var(--pri)}
+  .row output{flex:none;width:52px;text-align:right;font-variant-numeric:tabular-nums;color:var(--tx2);font-size:12px}
+  .sw{position:relative;flex:none;width:36px;height:20px;border-radius:10px;background:var(--sw);transition:background .18s}
+  .sw::before{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;
+    box-shadow:0 1px 2px rgba(0,0,0,.3);transition:transform .18s}
+  .sw.on{background:var(--pri)}
+  .sw.on::before{transform:translateX(16px)}
+  .btn{padding:5px 11px;font-size:12.5px;color:var(--tx);background:var(--card);border:1px solid var(--bd);
+    border-radius:calc(var(--r) - 3px)}
+  .btn.pri{color:#fff;background:var(--pri);border-color:var(--pri)}
+  .btn.danger{color:#fff;background:#e6483d;border-color:#e6483d}
+  .btn:active{transform:translateY(1px)}
+  .hint{font-size:11px;color:var(--tx3);line-height:1.5;margin-top:5px}
+  .swrow{display:flex;flex-wrap:wrap;gap:8px}
+  .swrow .pill{display:flex;align-items:center;gap:7px;padding:4px 9px;font-size:12px;color:var(--tx);
+    background:var(--card);border:1px solid var(--bd);border-radius:999px;cursor:default}
+  .note{padding:8px 10px;font-size:11.5px;color:#9a6a2a;background:rgba(250,200,90,.14);
+    border:1px solid rgba(210,160,60,.35);border-radius:calc(var(--r) - 3px);line-height:1.5}
+  .note.ok{color:#1d7a4d;background:rgba(80,200,140,.13);border-color:rgba(50,170,110,.32)}
+
+  /* ---- chat ---- */
+  #chatlog{flex:1;overflow-y:auto;padding:12px 12px 6px;display:flex;flex-direction:column;gap:8px;background:var(--bg)}
+  .msg{max-width:82%;padding:7px 10px;font-size:13px;line-height:1.45;border-radius:var(--r);word-break:break-word}
+  .msg.me{align-self:flex-end;color:#fff;background:var(--pri)}
+  .msg.pet{align-self:flex-start;color:var(--tx);background:var(--card);border:1px solid var(--bd)}
+  .msg.sys{align-self:center;font-size:11px;color:var(--tx3);background:none;padding:2px}
+  #chatform{flex:none;display:flex;gap:7px;padding:9px;background:var(--card);border-top:1px solid var(--bd)}
+  #chatin{flex:1;min-width:0;padding:6px 8px;font-size:13px;color:var(--tx);background:var(--inp);
+    border:1px solid var(--bd);border-radius:var(--r)}
+  #chatform .btn{flex:none}
+
+  /* ---- status mini panel ---- */
+  #status{position:fixed;right:14px;bottom:56px;width:216px;z-index:90;padding:11px 13px;display:none;
+    color:var(--tx);background:var(--bg);border:1px solid var(--bd);border-radius:var(--r);
+    box-shadow:0 8px 26px rgba(10,20,40,.28);font-size:12px}
+  #status.open{display:block}
+  #status h4{font-size:12.5px;margin-bottom:8px;color:var(--tx);display:flex;align-items:center;gap:6px}
+  .bar{height:9px;border-radius:5px;background:var(--sw);overflow:hidden;margin:3px 0 8px}
+  .bar i{display:block;height:100%;border-radius:5px;background:var(--pri);transition:width .4s}
+  .kv{display:flex;justify-content:space-between;gap:8px;margin:4px 0;color:var(--tx2)}
+  .kv b{color:var(--tx);font-weight:600;font-variant-numeric:tabular-nums}
+
+  /* ---- diary / milestone ---- */
+  #dlgbody[data-page="diary"],#dlgbody[data-page="milestone"]{display:block}
+  .dlhead{display:flex;align-items:center;gap:8px;margin-bottom:10px}
+  .dlhead select{flex:0 1 150px;padding:4px 6px;color:var(--tx);background:var(--inp);border:1px solid var(--bd);border-radius:calc(var(--r) - 3px)}
+  .paper{padding:13px 15px;font-size:13px;line-height:1.85;color:#40475a;background:var(--paper);
+    border:1px solid var(--bd);border-radius:var(--r);white-space:pre-wrap}
+  .badge-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(126px,1fr));gap:9px}
+  .card{display:flex;align-items:center;gap:9px;padding:9px;background:var(--card);border:1px solid var(--bd);border-radius:var(--r)}
+  .card .dot{flex:none;width:30px;height:30px;border-radius:50%;display:grid;place-items:center;font-size:15px;
+    background:var(--pri);color:#fff}
+  .card.lock .dot{background:var(--bd);color:var(--tx3)}
+  .card .t{min-width:0}
+  .card .t b{display:block;font-size:12.5px;color:var(--tx);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .card .t span{font-size:11px;color:var(--tx3)}
+
+  /* ---- taskbar / tray ---- */
+  #taskbar{position:fixed;left:0;right:0;bottom:0;height:44px;z-index:95;display:flex;align-items:center;gap:8px;
+    padding:0 12px;background:var(--bar);border-top:1px solid var(--bd);
+    box-shadow:0 -2px 12px rgba(10,20,40,.16)}
+  #traybtn{width:32px;height:32px;border-radius:8px;display:grid;place-items:center;font-size:20px;
+    background:var(--card);border:1px solid var(--bd)}
+  #traybtn:active{transform:scale(.94)}
+  #hint{flex:1;font-size:11.5px;color:var(--tx3);line-height:1.35;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #taskbtn{width:32px;height:32px;border-radius:8px;font-size:17px;background:var(--card);border:1px solid var(--bd);color:var(--tx)}
+  #menu{position:absolute;display:none;z-index:210;min-width:206px;padding:5px;background:var(--card);
+    border:1px solid var(--bd);border-radius:var(--r);box-shadow:0 12px 34px rgba(10,20,40,.32);font-size:13px;color:var(--tx)}
+  #menu.open{display:block}
+  #menu button{display:flex;align-items:center;gap:8px;width:100%;padding:6px 10px;text-align:left;border-radius:calc(var(--r) - 4px)}
+  #menu button:hover{background:var(--pri);color:#fff}
+  #menu hr{margin:4px 6px;border:none;border-top:1px solid var(--bd)}
+  #menu .sub{font-size:11px;color:var(--tx3)}
+</style>
+</head>
+<body>
+<div id="scene">
+  <div id="wallpaper" aria-hidden="true">
+    <svg viewBox="0 0 200 200"><g fill="none" stroke="#8fa1bd" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="100" cy="92" r="52"/>
+      <path d="M58 58 Q40 30 58 24 Q72 20 78 44"/>
+      <path d="M142 58 Q160 30 142 24 Q128 20 122 44"/>
+      <circle cx="83" cy="88" r="4.2" fill="#8fa1bd" stroke="none"/>
+      <circle cx="117" cy="88" r="4.2" fill="#8fa1bd" stroke="none"/>
+      <path d="M92 110 Q100 118 108 110"/>
+      <ellipse cx="76" cy="103" rx="6" ry="3.4" fill="#f7b6c8" stroke="none" opacity=".7"/>
+      <ellipse cx="124" cy="103" rx="6" ry="3.4" fill="#f7b6c8" stroke="none" opacity=".7"/>
+    </g></svg>
+  </div>
+
+  <div id="win" role="application" aria-label="窗口">
+    <div id="winbar">
+      <span id="wintitle">README.md — 我的代码编辑器</span>
+      <button id="winmax" title="模拟全屏 / 最大化" hidden>❐</button>
+      <button id="winclose" title="关闭窗口">✕</button>
+    </div>
+    <div id="winbody">
+      <div class="wl"><span>def 摸头(dog):</span></div>
+      <div class="wl"><span>&nbsp;&nbsp;return dog.开心()</span></div>
+      <div class="wl"><span># 拖动标题栏、缩放窗口，或在窗口里打字</span></div>
+      <div class="wl"><span># 全屏 / 最大化时小狗会自动隐藏</span></div>
+      <div class="wl"><span># 窗口靠近屏幕边时小狗会扒着边偷看</span></div>
+      <div class="btns">
+        <button class="btn pri" id="win-max">最大化</button>
+        <button class="btn" id="win-close">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <canvas id="fx" class="layer"></canvas>
+  <canvas id="paw" class="layer"></canvas>
+  <div id="pets"></div>
+</div>
+
+<div id="cursorpet" hidden></div>
+
+<div id="bongo" hidden>
+  <img id="bongoimg" alt="bongo dog">
+</div>
+
+<div id="shot" hidden><img alt=""></div>
+
+<div id="dlgroot">
+  <div id="dlg">
+    <div id="dlghead"><span id="dlgtitle"></span><span class="sp"></span><button id="dlgclose" title="关闭">✕</button></div>
+    <div id="dlgbody" data-page="settings"></div>
+  </div>
+</div>
+
+<div id="status"></div>
+
+<div id="taskbar">
+  <button id="traybtn" title="LineDogPet 托盘菜单">🐶</button>
+  <div id="hint">加载中…</div>
+  <button id="taskbtn" title="状态面板">📊</button>
+</div>
+<div id="menu"></div>
+
+<script src="assets/manifest.js"></script>
+<script src="assets/bongomanifest.js"></script>
+<script src="js/data.js"></script>
+<script src="js/core.js"></script>
+<script src="js/assets.js"></script>
+<script src="js/sound.js"></script>
+<script src="js/pet.js"></script>
+<script src="js/fx.js"></script>
+<script src="js/pawprint.js"></script>
+<script src="js/drops.js"></script>
+<script src="js/observe.js"></script>
+<script src="js/diary.js"></script>
+<script src="js/ai.js"></script>
+<script src="js/panels.js"></script>
+<script src="js/cursorpet.js"></script>
+<script src="js/bongo.js"></script>
+<script src="js/app.js"></script>
+<script>
+  window.addEventListener('error',function(e){
+    var h=document.getElementById('hint');
+    if(h) h.textContent='脚本异常：'+(e.message||e)+'（详见控制台）';
+  });
+  var boot=setInterval(function(){
+    if(window.App){clearInterval(boot);App.start();}
+  },50);
+  setTimeout(function(){var h=document.getElementById('hint');
+    if(h&&!window.App)h.textContent='资源加载较慢…请稍候';},8000);
+</script>
+</body>
+</html>

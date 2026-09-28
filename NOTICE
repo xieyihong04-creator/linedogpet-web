@@ -1,0 +1,22 @@
+LineDogPet Web Port — NOTICE
+=========================
+
+This is a derivative work of "LineDogPet" (https://github.com/Mrjiumeng/LineDogPet),
+authored by chu minghao, reverse-engineered from its compiled Python bytecode and
+re-implemented as a static web page.
+
+Upstream project states (translated from its README):
+  "This project is open source and free, for learning and communication only,
+   commercial use is PROHIBITED. The copyright of all Line Dog art assets belongs
+   to the original asset authors. Do not use this project or its assets for any
+   commercial purpose."
+
+The bundled LICENSE file is the unfilled Apache-2.0 boilerplate shipped with the
+upstream repository (its copyright-owner placeholder was never completed) and does
+NOT grant commercial rights to the art assets.
+
+Art assets under assets/ (GIF-derived WebP atlases and bongo PNGs) are NOT covered
+by any grant from this repository. Their copyright belongs to the original creators.
+
+If you wish to use, host commercially, or redistribute these assets, obtain
+permission from the upstream author and the asset copyright holders first.
