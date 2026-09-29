@@ -7,8 +7,8 @@
  * 差异标注：
  *   - QMovie → Movie（assets.js 已实现）
  *   - frameChanged → Movie.onFrame 回调
- *   - setScaledSize + devicePixelRatio 超采样 → background-size 等比缩放
- *     （元素尺寸 nw×nh，background-size = cols*nw × rows*nh，等价整张图集缩放）
+ *   - setScaledSize + devicePixelRatio 超采样 → background-size 逐帧定位
+ *     （整表按 gutter 步距缩放 + 当前帧矩形偏移，见 _applyFrame）
  *   - QCursor.pos() → document 级 pointermove 追踪
  *   - FramelessWindowHint → 透明 div，pointer-events 控制
  *   - RegisterHotKey → 无（由 app.js 处理）
@@ -167,7 +167,6 @@
     this._walk_visual = false;
     this._src_w = 0;
     this._src_h = 0;
-    this._render_ss = 2;
 
     /* ---- 位置/尺寸 ---- */
     this._x = 0;
@@ -619,50 +618,46 @@
     var nh = le;
     var nw = Math.max(1, Math.floor(w0 * le / h0));
 
-    /* 超采样因子（等价 devicePixelRatio） */
-    var dpr = 1;
-    try { dpr = window.devicePixelRatio || 1; } catch (e) {}
-    var ss = Math.max(2, Math.round(dpr));
-
     movie.setSpeed(this._speed_pct());
 
     var self = this;
-    var meta = movie.meta;
 
-    /* 设置 DOM 元素尺寸和背景 */
-    this.el.style.width = nw + 'px';
-    this.el.style.height = nh + 'px';
-    this.el.style.backgroundImage = 'url(assets/' + meta.img + ')';
-    /* background-size = cols*nw × rows*nh（整张图集等比缩放） */
-    this.el.style.backgroundSize = (meta.cols * nw) + 'px ' + (meta.rows * nh) + 'px';
-
-    /* 帧回调 → 更新 background-position */
-    movie.onFrame(function (frameIdx) {
-      var rect = movie.frameRect(frameIdx);
-      self.el.style.backgroundPosition = (-rect.x * nw / meta.w) + 'px ' + (-rect.y * nh / meta.h) + 'px';
-    });
-
-    /* apply frame 0 immediately */
-    var rect0 = movie.frameRect(0);
-    this.el.style.backgroundPosition = (-rect0.x * nw / meta.w) + 'px ' + (-rect0.y * nh / meta.h) + 'px';
-
-    movie.start();
-
-    /* swap old movie */
+    /* 先换上新的 movie 实例：_applyFrame 读的就是 this.movie */
     var old = this.movie;
     this.movie = movie;
     this._last_path = path;
     this._src_w = w0;
     this._src_h = h0;
-    this._render_ss = ss;
 
     this._w = nw;
     this._h = nh;
+    this._applyFrame();
+
+    /* 帧回调 → 用「当前」元素尺寸换算，不能在闭包里钉死 nw/nh：
+     * 挤压动画会把元素放大缩小，若沿用旧值，background-position 会偏移到
+     * 相邻帧上，直接叠出另一张图（用户看到的“叠影”）。 */
+    movie.onFrame(function () { self._applyFrame(); });
+
+    movie.start();
+
     this._place_by_ground(ground);
 
     if (old) {
       old.dispose();
     }
+  };
+
+  /* ---- 图集定位：按元素当前尺寸换算 background-size / background-position ----
+   * 唯一出口，_play / _apply_squash / _rescale 共用，避免各处缩放值不一致。 */
+  Pet.prototype._applyFrame = function () {
+    if (!this.movie || !this.movie.meta) return;
+    var meta = this.movie.meta;
+    var bg = global.atlasBg(meta, this._w, this._h, this.movie.frameRect(this.movie.currentFrame()));
+    this.el.style.width = this._w + 'px';
+    this.el.style.height = this._h + 'px';
+    this.el.style.backgroundImage = 'url(assets/' + meta.img + ')';
+    this.el.style.backgroundSize = bg.sizeX + 'px ' + bg.sizeY + 'px';
+    this.el.style.backgroundPosition = bg.posX + 'px ' + bg.posY + 'px';
   };
 
   /* ==========================================================================
@@ -1102,21 +1097,12 @@
 
     var nw = Math.max(1, Math.floor(this._squash_base_w * sx));
     var nh = Math.max(1, Math.floor(this._squash_base_h * sy));
-    var meta = this.movie.meta;
-    if (!meta) return;
+    if (!this.movie.meta) return;
 
-    /* update DOM size and background-size */
-    this.el.style.width = nw + 'px';
-    this.el.style.height = nh + 'px';
-    this.el.style.backgroundSize = (meta.cols * nw) + 'px ' + (meta.rows * nh) + 'px';
-
-    /* update background-position for current frame */
-    var frameIdx = this.movie.currentFrame();
-    var rect = this.movie.frameRect(frameIdx);
-    this.el.style.backgroundPosition = (-rect.x * nw / meta.w) + 'px ' + (-rect.y * nh / meta.h) + 'px';
-
+    /* 尺寸变了就走同一个 _applyFrame：缩放值必须来自当前 nw/nh */
     this._w = nw;
     this._h = nh;
+    this._applyFrame();
 
     /* ground anchor: bottom-center stays, offset by dy */
     var g = this._squash_ground;
@@ -1587,21 +1573,13 @@
     var le = Math.max(40, Math.floor((this.cfg.size || 150) * this._extra_scale));
     var nh = le;
     var nw = Math.max(1, Math.floor(w0 * le / h0));
-    var meta = this.movie.meta;
-    if (!meta) return;
+    if (!this.movie.meta) return;
 
     var ground = this.ground_center();
 
-    this.el.style.width = nw + 'px';
-    this.el.style.height = nh + 'px';
-    this.el.style.backgroundSize = (meta.cols * nw) + 'px ' + (meta.rows * nh) + 'px';
-
-    var frameIdx = this.movie.currentFrame();
-    var rect = this.movie.frameRect(frameIdx);
-    this.el.style.backgroundPosition = (-rect.x * nw / meta.w) + 'px ' + (-rect.y * nh / meta.h) + 'px';
-
     this._w = nw;
     this._h = nh;
+    this._applyFrame();
     this._place_by_ground(ground);
   };
 

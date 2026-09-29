@@ -55,7 +55,6 @@
     this._last_path = '';         // 上次加载的素材路径（避免重复加载）
     this._src_w = 0;              // 原始帧宽
     this._src_h = 0;              // 原始帧高
-    this._render_ss = 1;          // DPR 缩放因子
     this._enabled = false;
     this._custom_dataurl = null;  // 用户上传的自定义 GIF DataURL
 
@@ -105,6 +104,9 @@
     this._enabled = !!on;
     if (this._enabled) {
       this._render();
+      /* index.html 里 #cursorpet 带 hidden 属性，而 [hidden]{display:none!important}
+       * 光靠 style.display='' 是盖不掉的 —— 必须真正移除属性 */
+      this._el.hidden = false;
       this._el.style.display = '';
       /* 绑定 pointermove（页面级） */
       document.addEventListener('pointermove', this._onPointerMove);
@@ -112,6 +114,7 @@
     } else {
       document.removeEventListener('pointermove', this._onPointerMove);
       this._el.style.display = 'none';
+      this._el.hidden = true;
     }
   };
 
@@ -224,15 +227,16 @@
     }
 
     /* 3. 路径未变则跳过 */
-    if (path === this._last_path && this._movie) return;
+    if (path === this._last_path && (this._movie || this._custom_url)) return;
     this._last_path = path;
 
-    /* 4. 销毁旧 Movie */
+    /* 4. 销毁旧渲染对象（图集 Movie 或自定义 DataURL） */
     if (this._movie) {
       var old = this._movie;
       this._movie = null;
       old.dispose();
     }
+    this._custom_url = null;
 
     /* 清空背景 */
     this._el.style.backgroundImage = '';
@@ -245,83 +249,64 @@
       return;
     }
 
-    /* 5. 创建新 Movie */
-    var movie = new global.Movie(path);
-    if (!movie.meta) {
-      /* 自定义 DataURL 没有 meta，用占位 */
-      this._src_w = 300;
-      this._src_h = 300;
-      this._render_ss = 1;
-      this._applySize(300, 300);
+    /* 5a. 自定义 DataURL：单图，不是图集，整图拉伸显示 */
+    if (path.indexOf('data:') === 0 || path.indexOf('blob:') === 0) {
+      var self0 = this;
+      var le0 = Math.max(CURSOR_SIZE_MIN, parseInt(this.cfg.cursor_size) || CURSOR_SIZE_DEFAULT);
+      var probe = new Image();
+      probe.onload = function () {
+        var pw0 = probe.naturalWidth || 1, ph0 = probe.naturalHeight || 1;
+        self0._src_w = pw0; self0._src_h = ph0;
+        self0._w = Math.max(1, parseInt(pw0 * le0 / ph0));
+        self0._h = le0;
+        self0._custom_url = path;
+        self0._el.style.backgroundImage = 'url("' + path + '")';
+        self0._el.style.backgroundSize = '100% 100%';
+        self0._el.style.backgroundPosition = '0px 0px';
+        self0._applySize(self0._w, self0._h);
+      };
+      probe.src = path;
       return;
     }
 
-    /* 获取首帧尺寸 */
-    var img = new Image();
+    /* 5b. 图集素材：单帧尺寸就是 meta.w×meta.h，长边 = cursor_size（等价 setScaledSize） */
+    var movie = new global.Movie(path);
     var self = this;
-    img.onload = function () {
-      var w0 = img.naturalWidth || movie.meta.w;
-      var h0 = img.naturalHeight || movie.meta.h;
-      if (w0 <= 0 || h0 <= 0) { w0 = 300; h0 = 300; }
+    if (!movie.meta) return;
+    this._applyMovie(movie);
+  };
 
-      /* 计算缩放 */
-      var le = Math.max(CURSOR_SIZE_MIN, parseInt(self.cfg.cursor_size) || CURSOR_SIZE_DEFAULT);
-      var nh = le;
-      var nw = Math.max(1, parseInt(w0 * le / h0));
+  /** 由 _render 调用：把 Movie 接到元素上并按当前尺寸定位 */
+  CursorPet.prototype._applyMovie = function (movie) {
+    var w0 = movie.meta.w, h0 = movie.meta.h;
+    var le = Math.max(CURSOR_SIZE_MIN, parseInt(this.cfg.cursor_size) || CURSOR_SIZE_DEFAULT);
+    var self = this;
 
-      /* DPR 处理（网页简化：用 window.devicePixelRatio） */
-      var dpr = window.devicePixelRatio || 1;
-      var ss = Math.max(2, parseInt(Math.round(dpr)));
+    this._src_w = w0;
+    this._src_h = h0;
+    this._movie = movie;
+    this._w = Math.max(1, parseInt(w0 * le / h0));
+    this._h = le;
+    this._applyFrame();
 
-      self._src_w = w0;
-      self._src_h = h0;
-      self._render_ss = ss;
-
-      /* 设置容器尺寸 */
-      self._applySize(nw, nh);
-
-      /* 启动 Movie */
-      movie.onFrame(function (frame) {
-        self._applyFrame(movie, frame, ss);
-      });
-      movie.start();
-      self._movie = movie;
-    };
-    img.onerror = function () {
-      /* 加载失败：用 meta 尺寸 */
-      var w0 = movie.meta.w || 300;
-      var h0 = movie.meta.h || 300;
-      self._src_w = w0;
-      self._src_h = h0;
-      self._render_ss = 1;
-      var le = Math.max(CURSOR_SIZE_MIN, parseInt(self.cfg.cursor_size) || CURSOR_SIZE_DEFAULT);
-      var nh = le;
-      var nw = Math.max(1, parseInt(w0 * le / h0));
-      self._applySize(nw, nh);
-      movie.onFrame(function (frame) {
-        self._applyFrame(movie, frame, 1);
-      });
-      movie.start();
-      self._movie = movie;
-    };
-    img.src = 'assets/' + movie.meta.img;
+    movie.onFrame(function () { self._applyFrame(); });
+    movie.start();
   };
 
   /**
    * 应用帧到背景（等价原版 _apply_frame）
-   * 用 background-position 实现图集步进
+   * 与 Pet._applyFrame 同一换算：整表按 gutter 步距缩放，再偏移当前帧矩形
    */
-  CursorPet.prototype._applyFrame = function (movie, frame, ss) {
+  CursorPet.prototype._applyFrame = function () {
+    var movie = this._movie;
     if (!movie || !movie.meta) return;
-    var rect = movie.frameRect(frame);
-    var bgX = -rect.x * ss;
-    var bgY = -rect.y * ss;
-    var bgW = movie.meta.cols * movie.meta.w * ss;
-    var bgH = movie.meta.rows * movie.meta.h * ss;
-    this._el.style.backgroundImage = 'url(assets/' + movie.meta.img + ')';
-    this._el.style.backgroundPosition = bgX + 'px ' + bgY + 'px';
-    this._el.style.backgroundSize = bgW + 'px ' + bgH + 'px';
+    var meta = movie.meta;
+    var bg = global.atlasBg(meta, this._w, this._h, movie.frameRect(movie.currentFrame()));
+    this._el.style.backgroundImage = 'url(assets/' + meta.img + ')';
+    this._el.style.backgroundSize = bg.sizeX + 'px ' + bg.sizeY + 'px';
+    this._el.style.backgroundPosition = bg.posX + 'px ' + bg.posY + 'px';
     this._el.style.backgroundRepeat = 'no-repeat';
+    this._applySize(this._w, this._h);
   };
 
   /**
@@ -336,17 +321,15 @@
    * 只缩放（等价原版 _rescale）
    */
   CursorPet.prototype._rescale = function () {
-    if (!this._movie || !this._movie.meta) return;
     if (this._src_w <= 0 || this._src_h <= 0) return;
-
     var le = Math.max(CURSOR_SIZE_MIN, parseInt(this.cfg.cursor_size) || CURSOR_SIZE_DEFAULT);
-    var nh = le;
-    var nw = Math.max(1, parseInt(this._src_w * le / this._src_h));
-    this._applySize(nw, nh);
-
-    /* 重新应用当前帧 */
-    if (this._movie) {
-      this._applyFrame(this._movie, this._movie.currentFrame(), this._render_ss);
+    this._w = Math.max(1, parseInt(this._src_w * le / this._src_h));
+    this._h = le;
+    if (this._movie && this._movie.meta) {
+      this._applyFrame();
+    } else if (this._custom_url) {
+      this._el.style.backgroundSize = '100% 100%';
+      this._applySize(this._w, this._h);
     }
   };
 

@@ -156,6 +156,21 @@
    * Movie —— QMovie 等价：按需加载图集、jumpToFrame / setSpeed / frameChanged
    * 同一时刻只保留当前一个动画（原版“QMovie 绝不缓存”）。
    * ======================================================================== */
+  /* ---- 图集 → CSS 背景换算（pet.js / cursorpet.js 共用的唯一出口）----
+   * 原版每帧画一张独立 QPixmap，帧与帧不可能互混；网页改用整张表 +
+   * background-position 步进，因此必须按 gutter 步距（pw/ph）缩放整表，
+   * 再把目标帧矩形偏移出去。nw×nh 是单帧的目标显示尺寸，两轴独立缩放，
+   * 等价原版 setScaledSize。 */
+  function atlasBg(meta, nw, nh, rect) {
+    var sx = nw / meta.w, sy = nh / meta.h;
+    return {
+      sizeX: meta.cols * (meta.pw || meta.w) * sx,
+      sizeY: meta.rows * (meta.ph || meta.h) * sy,
+      posX: -rect.x * sx,
+      posY: -rect.y * sy
+    };
+  }
+
   function Movie(rel) {
     this.rel = rel;
     this.meta = MANIFEST[rel] || null;
@@ -168,12 +183,20 @@
     this.frameCount = this.meta ? this.meta.count : 1;
     this.stateCount = this.frameCount;
   }
+  /* 帧在图集里的像素矩形（左上角）。
+   * 图集每个单元带 gutter（四周 GUT 像素透明边），所以步距是 pw/ph 而不是 w/h，
+   * 内容还要往内缩 gut。原版逐个 QPixmap 绘制，帧与帧天然独立；网页整表缩放取格时
+   * 留边可挡住部分引擎重采样时采到相邻帧像素的情况（Chromium 实测不渗，
+   * 此处作为跨引擎防护）。真正造成错位叠影的是尺寸变化后沿用旧缩放，见 atlasBg。 */
   Movie.prototype.frameRect = function (i) {
     var m = this.meta;
     if (!m) return { x: 0, y: 0, w: 0, h: 0 };
+    var gut = m.gut || 0;
+    var pw = m.pw || m.w, ph = m.ph || m.h;
     var c = i % m.cols, r = Math.floor(i / m.cols);
-    return { x: c * m.w, y: r * m.h, w: m.w, h: m.h };
+    return { x: c * pw + gut, y: r * ph + gut, w: m.w, h: m.h };
   };
+  /* 单帧尺寸（等价 QMovie.currentImage().size()）；整表尺寸由 atlasBg 按 cols*pw 算出 */
   Movie.prototype.size = function () { return this.meta ? [this.meta.w, this.meta.h] : [0, 0]; };
   Movie.prototype.speedDelay = function (i) {
     var d = (this.meta && this.meta.delay[i % this.frameCount]) || 0;
@@ -226,6 +249,7 @@
   };
 
   global.Movie = Movie;
+  global.atlasBg = atlasBg;
   global.AssetIndex = AssetIndex;
   global.ASSET_MANIFEST = MANIFEST;
 })(window);
